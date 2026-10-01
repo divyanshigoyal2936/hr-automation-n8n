@@ -1,0 +1,33 @@
+# N8N Configuration
+N8N_HOST=0.0.0.0
+N8N_PORT=5678
+N8N_PROTOCOL=https
+N8N_BASIC_AUTH_ACTIVE=true
+N8N_BASIC_AUTH_USER=admin
+N8N_BASIC_AUTH_PASSWORD=your_secure_password
+
+# OpenAI
+OPENAI_API_KEY=sk-your-openai-api-key
+
+# Google APIs
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REFRESH_TOKEN=your-google-refresh-token
+
+# Airtable
+AIRTABLE_API_KEY=your-airtable-api-key
+AIRTABLE_BASE_ID=your-airtable-base-id
+
+# LinkedIn
+LINKEDIN_CLIENT_ID=your-linkedin-client-id
+LINKEDIN_CLIENT_SECRET=your-linkedin-client-secret
+
+# Wellfound (AngelList)
+WELLFOUND_API_KEY=your-wellfound-api-key
+
+# Webhook Security
+WEBHOOK_SECRET_TOKEN=your-secure-random-token
+
+# Email
+HR_EMAIL=hr@yourcompany.com
+HR_TEAM_EMAIL=hr-team@yourcompany.com

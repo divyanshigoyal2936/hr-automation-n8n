@@ -1,0 +1,261 @@
+{
+  "name": "2 - Application Collection & Processing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "receive-application",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "1",
+      "name": "Webhook: Receive Application",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const requiredFields = ['name', 'email', 'phone', 'resume_url', 'job_id'];\nconst missing = requiredFields.filter(f => !$json[f] || $json[f].trim() === '');\n\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nconst phoneRegex = /^[\\+]?[(]?[0-9]{3}[)]?[-\\s\\.]?[0-9]{3}[-\\s\\.]?[0-9]{4,6}$/;\n\nlet errors = [];\nif (missing.length > 0) errors.push(`Missing fields: ${missing.join(', ')}`);\nif (!emailRegex.test($json.email)) errors.push('Invalid email format');\nif (!phoneRegex.test($json.phone)) errors.push('Invalid phone format');\n\nreturn [{\n  json: {\n    ...$json,\n    valid: errors.length === 0,\n    errors: errors\n  }\n}];"
+      },
+      "id": "2",
+      "name": "Validate Application Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{$json.valid}}",
+              "rightValue": true,
+              "operator": "equal"
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "3",
+      "name": "IF: Valid Application?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "to": "={{$json.email}}",
+        "subject": "Application Submission Issue",
+        "text": "Hi {{$json.name}},\n\nWe received your application but there were issues with your submission:\n\n{{$json.errors.join('\\n')}}\n\nPlease correct these and resubmit.\n\nBest regards,\nHR Team",
+        "html": "<h2>Application Submission Issue</h2><p>Hi {{$json.name}},</p><p>We received your application but there were issues:</p><ul>{{#each errors}}<li>{{$this}}</li>{{/each}}</ul><p>Please correct these and resubmit.</p><p>Best regards,<br/>HR Team</p>"
+      },
+      "id": "4",
+      "name": "Send Error Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [910, 200],
+      "credentials": {
+        "gmailOAuth2Api": "gmailOAuth2Api"
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Applicants",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"fields\": {\n    \"Name\": \"{{$json.name}}\",\n    \"Email\": \"{{$json.email}}\",\n    \"Phone\": \"{{$json.phone}}\",\n    \"Resume_URL\": \"{{$json.resume_url}}\",\n    \"Cover_Letter\": \"{{$json.cover_letter}}\",\n    \"LinkedIn_Profile\": \"{{$json.linkedin_profile}}\",\n    \"Referred_By\": \"{{$json.referred_by}}\",\n    \"Job_ID\": \"{{$json.job_id}}\",\n    \"Status\": \"New\",\n    \"Submission_Date\": \"{{$now}}\"\n  }\n}"
+      },
+      "id": "5",
+      "name": "Store Application in Airtable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [910, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$json.resume_url}}",
+        "authentication": "none",
+        "responseFormat": "file",
+        "options": {}
+      },
+      "id": "6",
+      "name": "Download Resume",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1130, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// This requires pdf-parse library - in n8n you'd use a custom node or external service\n// For now, returning placeholder structure\n// In production, use a proper PDF parsing service\nreturn [{\n  json: {\n    ...$json,\n    parsed_resume: {\n      skills: [],\n      years_experience: 0,\n      education_level: '',\n      previous_companies: [],\n      raw_text: 'PDF parsing requires external service - integrate pdf-parse or similar'\n    }\n  }\n}];"
+      },
+      "id": "7",
+      "name": "Parse Resume Text",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1350, 400]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Applicants/{{$json.id}}",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"fields\": {\n    \"Parsed_Skills\": \"{{$json.parsed_resume.skills.join(', ')}}\",\n    \"Years_Experience\": {{$json.parsed_resume.years_experience}},\n    \"Education_Level\": \"{{$json.parsed_resume.education_level}}\",\n    \"Previous_Companies\": \"{{$json.parsed_resume.previous_companies.join(', ')}}\"\n  }\n}"
+      },
+      "id": "8",
+      "name": "Update Airtable with Parsed Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1570, 400]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "to": "={{$json.email}}",
+        "subject": "Application Received - {{$json.job_title}}",
+        "text": "Hi {{$json.name}},\n\nThank you for applying to {{$json.job_title}} at our company!\n\nWe have received your application and our team will review it within 3-5 business days.\n\nNext steps:\n1. Our AI system will evaluate your profile against the job requirements\n2. If shortlisted, you'll receive an interview invitation\n3. You'll be updated at every stage\n\nFor questions, contact hr@yourcompany.com\n\nBest regards,\nHR Team",
+        "html": "<h2>Application Received</h2><p>Hi {{$json.name}},</p><p>Thank you for applying to <strong>{{$json.job_title}}</strong> at our company!</p><p>We have received your application and our team will review it within 3-5 business days.</p><h3>Next Steps:</h3><ol><li>Our AI system will evaluate your profile against the job requirements</li><li>If shortlisted, you'll receive an interview invitation</li><li>You'll be updated at every stage</li></ol><p>For questions, contact <a href='mailto:hr@yourcompany.com'>hr@yourcompany.com</a></p><p>Best regards,<br/>HR Team</p>"
+      },
+      "id": "9",
+      "name": "Send Confirmation Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1790, 400],
+      "credentials": {
+        "gmailOAuth2Api": "gmailOAuth2Api"
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Communications",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"fields\": {\n    \"Candidate_ID\": \"{{$json.id}}\",\n    \"Email_Type\": \"Application_Confirmation\",\n    \"Sent_Date\": \"{{$now}}\",\n    \"Template_Used\": \"application_confirmation\",\n    \"Recipient\": \"{{$json.email}}\"\n  }\n}"
+      },
+      "id": "10",
+      "name": "Log Communication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2010, 400]
+    }
+  ],
+  "connections": {
+    "Webhook: Receive Application": {
+      "main": [
+        [
+          {
+            "node": "Validate Application Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Application Data": {
+      "main": [
+        [
+          {
+            "node": "IF: Valid Application?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Valid Application?": {
+      "main": [
+        [
+          {
+            "node": "Send Error Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Store Application in Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Application in Airtable": {
+      "main": [
+        [
+          {
+            "node": "Download Resume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Resume": {
+      "main": [
+        [
+          {
+            "node": "Parse Resume Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Resume Text": {
+      "main": [
+        [
+          {
+            "node": "Update Airtable with Parsed Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Airtable with Parsed Data": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Confirmation Email": {
+      "main": [
+        [
+          {
+            "node": "Log Communication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "2"
+}

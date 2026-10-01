@@ -1,0 +1,265 @@
+{
+  "name": "3 - Candidate Matching & Scoring",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "everyXHours",
+              "value": 6
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Schedule Trigger (Every 6 Hours)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Applicants",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}"
+        },
+        "queryParameters": {
+          "filterByFormula": "{Status} = 'New'",
+          "maxRecords": 50
+        }
+      },
+      "id": "2",
+      "name": "Fetch New Applications",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "3",
+      "name": "Split In Batches (1 at a time)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Jobs/{{$json.fields.Job_ID[0]}}",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}"
+        }
+      },
+      "id": "4",
+      "name": "Fetch Job Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are an expert recruiter. Evaluate how well this candidate matches the job requirements. Provide a match score (0-100) and detailed reasoning. Return JSON only with: {\"score\": number, \"reasoning\": \"string\", \"skills_match\": number, \"experience_match\": number, \"education_match\": number}"
+          },
+          {
+            "role": "user",
+            "content": "CANDIDATE PROFILE:\nName: {{$json.fields.Name}}\nEmail: {{$json.fields.Email}}\nSkills: {{$json.fields.Parsed_Skills}}\nExperience: {{$json.fields.Years_Experience}} years\nEducation: {{$json.fields.Education_Level}}\nPrevious Companies: {{$json.fields.Previous_Companies}}\nResume Text: {{$json.fields.Resume_Text}}\n\nJOB REQUIREMENTS:\nTitle: {{$json.fields.Job_Title}}\nDescription: {{$json.fields.Description}}\nRequired Skills: {{$json.fields.Required_Skills}}\nExperience Level: {{$json.fields.Experience_Level}}\nDepartment: {{$json.fields.Department}}"
+          }
+        ],
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 1000,
+          "responseFormat": "json_object"
+        }
+      },
+      "id": "5",
+      "name": "AI Candidate Evaluation (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.2,
+      "position": [1130, 300],
+      "credentials": {
+        "openAiApi": "openAiApi"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const aiResult = JSON.parse($json.choices[0].message.content);\n\nconst requiredSkillsMatch = aiResult.skills_match || 0;\nconst experienceMatch = aiResult.experience_match || 0;\nconst educationMatch = aiResult.education_match || 0;\nconst aiScore = aiResult.score || 0;\n\nconst finalScore = Math.round(\n  (requiredSkillsMatch * 0.40) +\n  (experienceMatch * 0.30) +\n  (educationMatch * 0.15) +\n  (aiScore * 0.15)\n);\n\nreturn [{\n  json: {\n    candidate_id: $json.id,\n    candidate_name: $json.fields.Name,\n    candidate_email: $json.fields.Email,\n    job_id: $json.fields.Job_ID[0],\n    job_title: $json.fields.Job_Title,\n    final_score: finalScore,\n    scoring_breakdown: {\n      skills: requiredSkillsMatch,\n      experience: experienceMatch,\n      education: educationMatch,\n      ai_evaluation: aiScore\n    },\n    ai_reasoning: aiResult.reasoning,\n    shortlist_recommended: finalScore >= 70\n  }\n}];"
+      },
+      "id": "6",
+      "name": "Calculate Final Score",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Applicants/{{$json.candidate_id}}",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"fields\": {\n    \"Match_Score\": {{$json.final_score}},\n    \"Scoring_Breakdown\": \"{{JSON.stringify($json.scoring_breakdown)}}\",\n    \"AI_Reasoning\": \"{{$json.ai_reasoning}}\",\n    \"Status\": \"Evaluated\",\n    \"Evaluation_Date\": \"{{$now}}\"\n  }\n}"
+      },
+      "id": "7",
+      "name": "Update Airtable with Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1570, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{$json.final_score >= 70}}",
+              "rightValue": true,
+              "operator": "equal"
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "8",
+      "name": "IF: Score >= 70?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1790, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Applicants/{{$json.candidate_id}}",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"fields\": {\n    \"Status\": \"Shortlisted\",\n    \"Shortlist_Date\": \"{{$now}}\"\n  }\n}"
+      },
+      "id": "9",
+      "name": "Mark as Shortlisted",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2010, 200]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Every 6 Hours)": {
+      "main": [
+        [
+          {
+            "node": "Fetch New Applications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch New Applications": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches (1 at a time)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches (1 at a time)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Job Details": {
+      "main": [
+        [
+          {
+            "node": "AI Candidate Evaluation (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Candidate Evaluation (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Calculate Final Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Final Score": {
+      "main": [
+        [
+          {
+            "node": "Update Airtable with Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Airtable with Score": {
+      "main": [
+        [
+          {
+            "node": "IF: Score >= 70?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Score >= 70?": {
+      "main": [
+        [
+          {
+            "node": "Mark as Shortlisted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Mark as Shortlisted": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches (1 at a time)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "3"
+}

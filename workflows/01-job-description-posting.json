@@ -1,0 +1,377 @@
+{
+  "name": "1 - Job Description Generation & Posting",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "job_title",
+              "value": ""
+            },
+            {
+              "name": "department",
+              "value": ""
+            },
+            {
+              "name": "experience_level",
+              "value": ""
+            },
+            {
+              "name": "key_responsibilities",
+              "value": ""
+            },
+            {
+              "name": "required_skills",
+              "value": ""
+            },
+            {
+              "name": "company_requirements",
+              "value": ""
+            }
+          ]
+        }
+      },
+      "id": "2",
+      "name": "Set Job Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Job_Templates",
+        "authentication": "none",
+        "options": {},
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}"
+        },
+        "queryParameters": {
+          "filterByFormula": "AND({Department} = '{{$json.department}}', {Experience_Level} = '{{$json.experience_level}}')"
+        }
+      },
+      "id": "3",
+      "name": "Get Template from Airtable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are an expert HR professional crafting engaging job descriptions. Use the provided template and requirements to create a comprehensive job posting that attracts qualified candidates while clearly communicating expectations. Include: role overview, responsibilities, required qualifications, desired skills, compensation range, benefits, and company culture."
+          },
+          {
+            "role": "user",
+            "content": "Template: {{$json.records[0].fields.Template_Content}}\n\nJob Parameters:\n- Title: {{$json.job_title}}\n- Department: {{$json.department}}\n- Experience: {{$json.experience_level}}\n- Responsibilities: {{$json.key_responsibilities}}\n- Required Skills: {{$json.required_skills}}\n- Company Requirements: {{$json.company_requirements}}\n\nCompany Hiring Policies: [Add your company policies here]"
+          }
+        ],
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 1500
+        }
+      },
+      "id": "4",
+      "name": "Generate Job Description (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.2,
+      "position": [910, 300],
+      "credentials": {
+        "openAiApi": "openAiApi"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "rightValue": ""
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{$json.auto_approve !== true}}",
+              "rightValue": true,
+              "operator": "equal"
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "5",
+      "name": "IF: Human Review Required?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "to": "={{$env.HR_EMAIL}}",
+        "subject": "Review Required: {{$json.job_title}} Job Description",
+        "text": "Please review the generated job description below:\n\n{{$json.generated_description}}\n\nApprove or request changes via the HR portal.",
+        "html": "<h2>Job Description Review Required</h2><p><strong>Position:</strong> {{$json.job_title}}</p><p><strong>Department:</strong> {{$json.department}}</p><hr/><div>{{$json.generated_description}}</div><p><a href='https://your-hr-portal.com/approve/{{$json.job_id}}'>Approve</a> | <a href='https://your-hr-portal.com/request-changes/{{$json.job_id}}'>Request Changes</a></p>"
+      },
+      "id": "6",
+      "name": "Send Approval Email (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1350, 200],
+      "credentials": {
+        "gmailOAuth2Api": "gmailOAuth2Api"
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "approve-job-description",
+        "responseMode": "lastNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "7",
+      "name": "Webhook: Receive Approval",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.2,
+      "position": [1350, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Jobs",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"fields\": {\n    \"Job_Title\": \"{{$json.job_title}}\",\n    \"Department\": \"{{$json.department}}\",\n    \"Experience_Level\": \"{{$json.experience_level}}\",\n    \"Description\": \"{{$json.generated_description}}\",\n    \"Required_Skills\": \"{{$json.required_skills}}\",\n    \"Status\": \"Active\",\n    \"Posted_Date\": \"{{$now}}\"\n  }\n}"
+      },
+      "id": "8",
+      "name": "Store Job in Airtable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1570, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/jobs",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.LINKEDIN_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"title\": \"{{$json.job_title}}\",\n  \"description\": \"{{$json.generated_description}}\",\n  \"companyId\": \"YOUR_COMPANY_ID\",\n  \"location\": \"YOUR_LOCATION\",\n  \"employmentType\": \"FULL_TIME\",\n  \"experienceLevel\": \"{{$json.experience_level}}\",\n  \"applicationUrl\": \"https://your-career-site.com/apply/{{$json.job_id}}\"\n}"
+      },
+      "id": "9",
+      "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1790, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.wellfound.com/v1/jobs",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.WELLFOUND_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"title\": \"{{$json.job_title}}\",\n  \"description\": \"{{$json.generated_description}}\",\n  \"skills\": \"{{$json.required_skills}}\",\n  \"location\": \"YOUR_LOCATION\",\n  \"remote\": false,\n  \"salary_min\": 0,\n  \"salary_max\": 0\n}"
+      },
+      "id": "10",
+      "name": "Post to Wellfound",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1790, 400]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Jobs/{{$json.job_id}}",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"fields\": {\n    \"LinkedIn_URL\": \"{{$json.linkedin_posting_url}}\",\n    \"Wellfound_URL\": \"{{$json.wellfound_posting_url}}\",\n    \"LinkedIn_Job_ID\": \"{{$json.linkedin_job_id}}\",\n    \"Wellfound_Job_ID\": \"{{$json.wellfound_job_id}}\",\n    \"Status\": \"Posted\"\n  }\n}"
+      },
+      "id": "11",
+      "name": "Update Airtable with Posting URLs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2010, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "to": "={{$env.HR_TEAM_EMAIL}}",
+        "subject": "Job Posted Successfully: {{$json.job_title}}",
+        "html": "<h2>Job Posting Complete</h2><p><strong>Position:</strong> {{$json.job_title}}</p><p><strong>Department:</strong> {{$json.department}}</p><p><strong>LinkedIn:</strong> <a href='{{$json.linkedin_url}}'>View Posting</a></p><p><strong>Wellfound:</strong> <a href='{{$json.wellfound_url}}'>View Posting</a></p>"
+      },
+      "id": "12",
+      "name": "Send Confirmation Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2230, 300],
+      "credentials": {
+        "gmailOAuth2Api": "gmailOAuth2Api"
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Job Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Job Parameters": {
+      "main": [
+        [
+          {
+            "node": "Get Template from Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Template from Airtable": {
+      "main": [
+        [
+          {
+            "node": "Generate Job Description (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Job Description (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "IF: Human Review Required?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Human Review Required?": {
+      "main": [
+        [
+          {
+            "node": "Send Approval Email (Gmail)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Store Job in Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approval Email (Gmail)": {
+      "main": [
+        [
+          {
+            "node": "Webhook: Receive Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Receive Approval": {
+      "main": [
+        [
+          {
+            "node": "Store Job in Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Job in Airtable": {
+      "main": [
+        [
+          {
+            "node": "Post to LinkedIn",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Post to Wellfound",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Update Airtable with Posting URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Wellfound": {
+      "main": [
+        [
+          {
+            "node": "Update Airtable with Posting URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Airtable with Posting URLs": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "1"
+}

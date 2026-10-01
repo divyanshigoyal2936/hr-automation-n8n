@@ -1,0 +1,494 @@
+{
+  "name": "4 - HR Validation & Interview Scheduling",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "everyXHours",
+              "value": 12
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Schedule Trigger (Twice Daily)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Applicants",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}"
+        },
+        "queryParameters": {
+          "filterByFormula": "AND({Status} = 'Shortlisted', {HR_Reviewed} != 'True')",
+          "sort[0][field]": "Match_Score",
+          "sort[0][direction]": "desc",
+          "maxRecords": 20
+        }
+      },
+      "id": "2",
+      "name": "Fetch Shortlisted Candidates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{$json.records.length > 0}}",
+              "rightValue": true,
+              "operator": "equal"
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "3",
+      "name": "IF: Candidates Awaiting Review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const candidates = $json.records.map(r => ({\n  id: r.id,\n  name: r.fields.Name,\n  email: r.fields.Email,\n  score: r.fields.Match_Score,\n  skills: r.fields.Parsed_Skills,\n  experience: r.fields.Years_Experience,\n  education: r.fields.Education_Level,\n  reasoning: r.fields.AI_Reasoning,\n  job_title: r.fields.Job_Title\n}));\n\nreturn [{ json: { candidates, count: candidates.length } }];"
+      },
+      "id": "4",
+      "name": "Format Candidates for Email",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "to": "={{$env.HR_EMAIL}}",
+        "subject": "{{$json.count}} Candidates Ready for Review",
+        "html": "<h2>Candidates Awaiting Your Review</h2><p>There are <strong>{{$json.count}}</strong> shortlisted candidates requiring your decision.</p>{{#each candidates}}<div style='border:1px solid #ddd; padding:15px; margin:10px 0; border-radius:5px;'><h3>{{$this.name}} - Score: {{$this.score}}/100</h3><p><strong>Email:</strong> {{$this.email}}</p><p><strong>Position:</strong> {{$this.job_title}}</p><p><strong>Skills:</strong> {{$this.skills}}</p><p><strong>Experience:</strong> {{$this.experience}} years</p><p><strong>Education:</strong> {{$this.education}}</p><p><strong>AI Reasoning:</strong> {{$this.reasoning}}</p><p><a href='https://your-hr-portal.com/review/{{$this.id}}?decision=approve' style='background:#28a745;color:white;padding:8px 16px;text-decoration:none;border-radius:4px;'>Approve</a> <a href='https://your-hr-portal.com/review/{{$this.id}}?decision=reject' style='background:#dc3545;color:white;padding:8px 16px;text-decoration:none;border-radius:4px;margin-left:10px;'>Reject</a></p></div>{{/each}}"
+      },
+      "id": "5",
+      "name": "Send HR Review Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1130, 200],
+      "credentials": {
+        "gmailOAuth2Api": "gmailOAuth2Api"
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hr-review-decision",
+        "responseMode": "lastNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "6",
+      "name": "Webhook: Receive HR Decision",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.2,
+      "position": [1130, 400]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Applicants/{{$json.candidate_id}}",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"fields\": {\n    \"HR_Reviewed\": true,\n    \"HR_Decision\": \"{{$json.decision}}\",\n    \"Review_Date\": \"{{$now}}\",\n    \"Reviewer\": \"{{$json.reviewer}}\"\n  }\n}"
+      },
+      "id": "7",
+      "name": "Record HR Decision",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1350, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{$json.decision === 'approve'}}",
+              "rightValue": true,
+              "operator": "equal"
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "8",
+      "name": "IF: Decision = Approve?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1570, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/calendar/v3/calendars/primary/freeBusy",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.GOOGLE_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "queryParameters": {
+          "timeMin": "={{$now}}",
+          "timeMax": "={{new Date(Date.now() + 14*24*60*60*1000).toISOString()}}",
+          "items[0][id]": "interviewer1@company.com",
+          "items[1][id]": "interviewer2@company.com"
+        }
+      },
+      "id": "9",
+      "name": "Find Available Slots (Google Calendar)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1790, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Simplified: return top 3 business hour slots\n// In production, parse freeBusy response and find common availability\nconst slots = [];\nconst start = new Date();\nfor (let i = 1; i <= 14; i++) {\n  const date = new Date(start);\n  date.setDate(date.getDate() + i);\n  if (date.getDay() === 0 || date.getDay() === 6) continue;\n  \n  ['09:00', '11:00', '14:00', '16:00'].forEach(time => {\n    const [h, m] = time.split(':');\n    const slotStart = new Date(date);\n    slotStart.setHours(parseInt(h), parseInt(m), 0, 0);\n    const slotEnd = new Date(slotStart);\n    slotEnd.setHours(slotEnd.getHours() + 1);\n    \n    slots.push({ start: slotStart.toISOString(), end: slotEnd.toISOString() });\n  });\n}\n\nreturn [{ json: { recommended_slots: slots.slice(0, 3) } }];"
+      },
+      "id": "10",
+      "name": "Rank Time Slots",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2010, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "to": "={{$json.candidate_email}}",
+        "subject": "Interview Invitation - {{$json.job_title}}",
+        "html": "<h2>Interview Invitation</h2><p>Hi {{$json.candidate_name}},</p><p>Congratulations! You've been shortlisted for the <strong>{{$json.job_title}}</strong> position.</p><p>Please select your preferred interview time:</p>{{#each recommended_slots}}<p><a href='https://your-hr-portal.com/select-time/{{$json.candidate_id}}?slot={{@index}}' style='display:inline-block;background:#007bff;color:white;padding:10px 20px;margin:5px;text-decoration:none;border-radius:4px;'>{{formatDate this.start 'MMM d, yyyy h:mm a'}} - {{formatDate this.end 'h:mm a'}}</a></p>{{/each}}<p>Interview Format: Video Call (Google Meet link will be provided upon confirmation)</p><p>Duration: 45-60 minutes</p><p>If none of these times work, please reply to this email.</p><p>Best regards,<br/>HR Team</p>"
+      },
+      "id": "11",
+      "name": "Send Interview Invitation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2230, 200],
+      "credentials": {
+        "gmailOAuth2Api": "gmailOAuth2Api"
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "select-interview-time",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "12",
+      "name": "Webhook: Receive Time Selection",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.2,
+      "position": [2230, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.GOOGLE_ACCESS_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"summary\": \"Interview: {{$json.candidate_name}} - {{$json.job_title}}\",\n  \"start\": {\n    \"dateTime\": \"{{$json.selected_time}}\",\n    \"timeZone\": \"UTC\"\n  },\n  \"end\": {\n    \"dateTime\": \"{{$json.selected_time_end}}\",\n    \"timeZone\": \"UTC\"\n  },\n  \"description\": \"Interview with {{$json.candidate_name}}\\n\\nCandidate Profile:\\n{{$json.candidate_summary}}\\n\\nInterview Guidelines:\\n{{$json.interview_guidelines}}\",\n  \"attendees\": [\n    { \"email\": \"{{$json.candidate_email}}\" },\n    { \"email\": \"interviewer1@company.com\" },\n    { \"email\": \"interviewer2@company.com\" }\n  ],\n  \"sendUpdates\": \"all\",\n  \"conferenceDataVersion\": 1\n}"
+      },
+      "id": "13",
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2450, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Interviews",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"fields\": {\n    \"Candidate_ID\": \"{{$json.candidate_id}}\",\n    \"Job_ID\": \"{{$json.job_id}}\",\n    \"Date_Time\": \"{{$json.selected_time}}\",\n    \"Interviewers\": \"interviewer1@company.com, interviewer2@company.com\",\n    \"Meeting_Link\": \"{{$json.meet_link}}\",\n    \"Status\": \"Scheduled\"\n  }\n}"
+      },
+      "id": "14",
+      "name": "Record Interview in Airtable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2670, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "to": "={{$json.candidate_email}}",
+        "subject": "Interview Confirmed - {{$json.formatted_date}}",
+        "html": "<h2>Interview Confirmed</h2><p>Hi {{$json.candidate_name}},</p><p>Your interview for <strong>{{$json.job_title}}</strong> has been scheduled!</p><p><strong>Date & Time:</strong> {{$json.formatted_date}}</p><p><strong>Format:</strong> Video Call</p><p><strong>Meeting Link:</strong> <a href='{{$json.meet_link}}'>Join Google Meet</a></p><p><strong>Interviewers:</strong> {{$json.interviewers}}</p><h3>Preparation Tips:</h3><ul><li>Review the job description</li><li>Prepare examples of your relevant experience</li><li>Test your camera and microphone beforehand</li><li>Join 5 minutes early</li></ul><p>If you need to reschedule, contact hr@yourcompany.com</p><p>Best regards,<br/>HR Team</p>",
+        "attachments": [
+          {
+            "content": "BEGIN:VCALENDAR...{{$json.ics_content}}...END:VCALENDAR",
+            "fileName": "interview.ics",
+            "contentType": "text/calendar"
+          }
+        ]
+      },
+      "id": "15",
+      "name": "Send Confirmation to Candidate",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2890, 200],
+      "credentials": {
+        "gmailOAuth2Api": "gmailOAuth2Api"
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "to": "interviewer1@company.com, interviewer2@company.com",
+        "subject": "Upcoming Interview: {{$json.candidate_name}}",
+        "html": "<h2>Interview Scheduled</h2><p>You have an upcoming interview:</p><p><strong>Candidate:</strong> {{$json.candidate_name}} ({{$json.candidate_email}})</p><p><strong>Position:</strong> {{$json.job_title}}</p><p><strong>Date & Time:</strong> {{$json.formatted_date}}</p><p><strong>Meeting Link:</strong> <a href='{{$json.meet_link}}'>Join Google Meet</a></p><p><strong>Candidate Summary:</strong> {{$json.candidate_summary}}</p><p><strong>Interview Guidelines:</strong> {{$json.interview_guidelines}}</p><p>Please review the candidate's resume before the interview.</p>"
+      },
+      "id": "16",
+      "name": "Notify Interviewers",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2890, 400],
+      "credentials": {
+        "gmailOAuth2Api": "gmailOAuth2Api"
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "to": "={{$json.candidate_email}}",
+        "subject": "Application Update - {{$json.job_title}}",
+        "text": "Hi {{$json.candidate_name}},\n\nThank you for your interest in the {{$json.job_title}} position. After careful review, we've decided to move forward with other candidates whose qualifications more closely match our current needs.\n\nWe'll keep your profile on file for future opportunities.\n\nBest regards,\nHR Team",
+        "html": "<h2>Application Update</h2><p>Hi {{$json.candidate_name}},</p><p>Thank you for your interest in the <strong>{{$json.job_title}}</strong> position. After careful review, we've decided to move forward with other candidates whose qualifications more closely match our current needs.</p><p>We'll keep your profile on file for future opportunities.</p><p>Best regards,<br/>HR Team</p>"
+      },
+      "id": "17",
+      "name": "Send Rejection Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1790, 500],
+      "credentials": {
+        "gmailOAuth2Api": "gmailOAuth2Api"
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://api.airtable.com/v0/{{$env.AIRTABLE_BASE_ID}}/Applicants/{{$json.candidate_id}}",
+        "authentication": "none",
+        "headers": {
+          "Authorization": "Bearer {{$env.AIRTABLE_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "bodyParametersJson": "={\n  \"fields\": {\n    \"Status\": \"Rejected\",\n    \"Rejection_Date\": \"{{$now}}\"\n  }\n}"
+      },
+      "id": "18",
+      "name": "Update Status to Rejected",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2010, 500]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Twice Daily)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Shortlisted Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Shortlisted Candidates": {
+      "main": [
+        [
+          {
+            "node": "IF: Candidates Awaiting Review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Candidates Awaiting Review?": {
+      "main": [
+        [
+          {
+            "node": "Format Candidates for Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Format Candidates for Email": {
+      "main": [
+        [
+          {
+            "node": "Send HR Review Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send HR Review Email": {
+      "main": [
+        [
+          {
+            "node": "Webhook: Receive HR Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Receive HR Decision": {
+      "main": [
+        [
+          {
+            "node": "Record HR Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record HR Decision": {
+      "main": [
+        [
+          {
+            "node": "IF: Decision = Approve?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Decision = Approve?": {
+      "main": [
+        [
+          {
+            "node": "Find Available Slots (Google Calendar)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Rejection Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Available Slots (Google Calendar)": {
+      "main": [
+        [
+          {
+            "node": "Rank Time Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank Time Slots": {
+      "main": [
+        [
+          {
+            "node": "Send Interview Invitation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Interview Invitation": {
+      "main": [
+        [
+          {
+            "node": "Webhook: Receive Time Selection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Receive Time Selection": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Record Interview in Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Interview in Airtable": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation to Candidate",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Interviewers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Rejection Email": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "4"
+}
