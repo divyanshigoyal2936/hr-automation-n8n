@@ -248,7 +248,7 @@ MIT License - see [LICENSE](LICENSE)
 
 ## 👤 Author
 
-**Lakshya**
+**Divyanshi**
 - GitHub: [@yourusername](https://github.com/yourusername)
 - LinkedIn: [Your Name](https://linkedin.com/in/yourname)
 - Email: your.email@example.com
