@@ -246,13 +246,6 @@ Replace placeholder with real PDF parsing:
 
 MIT License - see [LICENSE](LICENSE)
 
-## 👤 Author
-
-**Divyanshi**
-- GitHub: [@yourusername](https://github.com/yourusername)
-- LinkedIn: [Your Name](https://linkedin.com/in/yourname)
-- Email: your.email@example.com
-
 ## 🙏 Acknowledgments
 
 - [n8n](https://n8n.io) - Workflow automation platform
