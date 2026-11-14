@@ -1,5 +1,121 @@
 # HR Automation System with n8n
 
+> End-to-end recruitment automation platform using n8n workflow orchestration, AI-powered candidate evaluation (GPT-4), and human-in-the-loop decision making.
+
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![n8n](https://img.shields.io/badge/n8n-1.0+-orange.svg)](https://n8n.io)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4-green.svg)](https://openai.com)
+[![Airtable](https://img.shields.io/badge/Airtable-Database-blue.svg)](https://airtable.com)
+[![Google Workspace](https://img.shields.io/badge/Google-Gmail%20%7C%20Calendar-red.svg)](https://workspace.google.com)
+[![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)]()
+
+---
+
+## 🎯 Overview
+
+This project automates the entire recruitment lifecycle—from automated job description generation and multi-platform posting to intelligent resume evaluation and calendar interview scheduling. It reduces time-to-hire by **30–40%**, cuts administrative workload by **70%**, and slashes operational costs from **₹1.65L–2.5L down to ₹16.5K–33K/month**.
+
+The architecture combines **n8n** (visual workflow automation engine), **OpenAI GPT-4** (content synthesis & semantic resume scoring), **Airtable** (relational recruitment database), **Google Workspace APIs** (Gmail email triggers & Google Calendar/Meet scheduling), and **Job Board APIs** (LinkedIn & Wellfound).
+
+---
+
+## ✨ Key Features
+
+### 🤖 AI-Powered Recruitment Intelligence
+- **Policy-Compliant JD Generation**: GPT-4 synthesizes comprehensive, role-specific job descriptions from Airtable department templates.
+- **Multi-Factor Candidate Scoring**: Computes a weighted match score out of 100:
+  $$\text{Final Score} = (\text{Skills} \times 0.40) + (\text{Experience} \times 0.30) + (\text{Education} \times 0.15) + (\text{AI Fit} \times 0.15)$$
+- **Structured Resume Data Extraction**: Normalizes candidate skills, experience years, previous employers, and education levels.
+
+### 👥 Human-in-the-Loop (HITL) Governance
+- **Job Description Approval**: Email preview sent to HR with one-click webhook approval before posting live.
+- **Shortlist Review Gate**: Twice-daily review digest of shortlisted candidates with full AI scoring rationales before interview invites are sent.
+- **HR Override & Rejection Handling**: Automated rejection email delivery and status tracking if HR rejects a candidate at any step.
+
+### 📅 End-to-End Orchestration
+- **Dual Job Distribution**: Instant simultaneous distribution to LinkedIn and Wellfound via REST APIs.
+- **Smart Interview Scheduling**: Queries interviewer Google Calendar `freeBusy` availability across a 14-day window and generates Google Meet links automatically upon candidate slot selection.
+- **Automated Communication & Audit Trail**: Automated email confirmations and `.ics` calendar invites logged directly into Airtable.
+
+---
+
+## 🏗️ System Architecture
+
+                            ┌──────────────────────────────────────────────┐
+                              │             WORKFLOW 1: JD & POSTING         │
+                              │  Manual Trigger ──▶ Fetch Template ──▶ GPT-4 │
+                              │      └──▶ HR Approval Webhook ──▶ APIs       │
+                              └──────────────┬───────────────────────────────┘
+                                             │ Posts Job & Stores Record
+                                             ▼
+                                             ┌──────────────────┐ ┌───────────────────────────┐ │ CAREER SITE │──────────────▶│ AIRTABLE BASE │ │ Application Form │ Webhook POST │ ┌───────────────────────┐ │ └────────┬─────────┘ │ │ Jobs │ │ │ │ │ Applicants │ │ ▼ │ │ Interviews │ │ ┌──────────────────────────────┐ │ │ Communications │ │ │ WORKFLOW 2: INTAKE & PARSE │───┼─▶ Job_Templates │ │ │ Validate ──▶ Parse ──▶ Email │ │ └───────────────────────┘ │ └──────────────────────────────┘ └─────────────┬─────────────┘ │ Periodic Batch Read ▼ ┌───────────────────────────┐ │ WORKFLOW 3: AI SCORING │ │ Fetch New ──▶ GPT-4 Eval │ │ ──▶ Score ──▶ Shortlist │ └─────────────┬─────────────┘ │ Reads Shortlisted ▼ ┌───────────────────────────┐ │ WORKFLOW 4: HR & SCHEDULE │ │ HR Review Digest ──▶ GCal │ │ ──▶ Slot Invite ──▶ Meet │ └───────────────────────────┘
+                                             
+---
+
+## 🔄 The 4 Core Workflows
+
+| # | Workflow File | Trigger | Core Operations | Key Outputs |
+|---|---------------|---------|-----------------|-------------|
+| **1** | `01-job-description-posting.json` | Manual Trigger | Fetches template from Airtable, GPT-4 JD generation, HR review approval check, posts to LinkedIn & Wellfound | Live job posts, updated Airtable `Jobs` record, HR confirmation email |
+| **2** | `02-application-collection.json` | Webhook (`POST /webhook/receive-application`) | Payload validation (regex check for email/phone), downloads resume, parses data, updates applicant profile | New record in `Applicants`, parsed fields, applicant confirmation email, audit record in `Communications` |
+| **3** | `03-candidate-matching.json` | Schedule Trigger (Every 6 Hours) | Batches pending applications (`Status = 'New'`), fetches role requirements, evaluates via GPT-4, calculates weighted score | Airtable fields updated: `Match_Score`, `Scoring_Breakdown`, `AI_Reasoning`; auto-shortlists candidates with score ≥ 70 |
+| **4** | `04-hr-validation-scheduling.json` | Schedule Trigger (Twice Daily) + Webhooks | Shortlist review digest to HR, receives decision via webhook; on approval checks Google Calendar availability, allows candidate time selection, creates Google Meet event | Google Meet calendar event, Airtable `Interviews` record, `.ics` candidate invite, interviewer notifications |
+
+---
+
+## ⚙️ Configuration & Credentials
+
+### 1. n8n UI Credentials
+These credentials must be created in the n8n web interface under **Settings → Credentials**:
+
+| Credential Name in n8n | Credential Type | Used In | Purpose |
+|------------------------|-----------------|---------|---------|
+| `openAiApi` | OpenAI API | Workflows 1, 3 | Authentication for GPT-4 prompt execution |
+| `gmailOAuth2Api` | Gmail OAuth2 | Workflows 1, 2, 4 | Sending automated emails (alerts, confirmations, invites, rejections) |
+
+### 2. Environment Variables (`.env`)
+The workflows use n8n expression references (such as `{{$env.AIRTABLE_API_KEY}}`) for HTTP Request nodes. Copy `config/environment.example` to `config/.env`:
+
+```bash
+cp config/environment.example config/.env
+
+| Variable Name | Description | Example / Format |
+| --- | --- | --- |
+| `AIRTABLE_API_KEY` | Airtable Personal Access Token (PAT) with `data.records:read` & `data.records:write` | `pat...` |
+| `AIRTABLE_BASE_ID` | Airtable Base ID from API docs or URL | `appXXXXXXXXXXXXXX` |
+| `GOOGLE_ACCESS_TOKEN` | OAuth2 Bearer Access Token for Google Calendar FreeBusy and Events API | `ya29....` |
+| `LINKEDIN_ACCESS_TOKEN` | LinkedIn Member/Organization Access Token with job posting permissions | `AQ...` |
+| `WELLFOUND_API_KEY` | Wellfound (AngelList) API Key | Bearer token string |
+| `HR_EMAIL` | Target email address for HR approval requests and daily review digests | `hr@yourcompany.com` |
+| `HR_TEAM_EMAIL` | Distribution email address for job posting notices | `hr-team@yourcompany.com` |
+| `GENERIC_TIMEZONE` | Timezone for n8n scheduling nodes | `Asia/Kolkata` |
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# HR Automation System with n8n
+
 > End-to-end recruitment automation platform using n8n workflow orchestration, AI-powered candidate evaluation, and human-in-the-loop decision making.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
