@@ -286,7 +286,7 @@ MIT License. Add a `LICENSE` file to the repository root so the badge link works
 **Divyanshi**
 - GitHub: [@ydivyanshigoyal2936](https://github.com/divyanshigoyal2936)
 - LinkedIn: [DivyanshiGoyal](https://linkedin.com/in/divya2936)
-- Email: your.email@example.com
+- Email: divyanshigoyal2936@gmail.com
 
 ## 🙏 Acknowledgments
 
